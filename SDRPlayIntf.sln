@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36202.13 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SDRPlayIntf", "SDRPlayIntf\SDRPlayIntf.vcxproj", "{95D04888-5075-44E5-BE38-386063FC0E55}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{95D04888-5075-44E5-BE38-386063FC0E55}.Debug|Win32.ActiveCfg = Debug|Win32
+		{95D04888-5075-44E5-BE38-386063FC0E55}.Debug|Win32.Build.0 = Debug|Win32
+		{95D04888-5075-44E5-BE38-386063FC0E55}.Release|Win32.ActiveCfg = Release|Win32
+		{95D04888-5075-44E5-BE38-386063FC0E55}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8CC15878-D09D-4DF3-8042-B4377A175A0E}
+	EndGlobalSection
+EndGlobal
