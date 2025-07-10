@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
-// sdrplayintf.rc で使用
+// sdrplay.rc で使用
 //
 
 // Next default values for new objects
