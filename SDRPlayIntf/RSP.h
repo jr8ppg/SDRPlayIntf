@@ -35,6 +35,8 @@ namespace SDRPlayIntf
 		int nLNAstate;
 		int nLastRSPIndex;
 		int chosen_rsp_idx;
+		int nAntenna;
+		int nHiz;
 	private:
 		sdrplay_api_Open_t              sdrplay_api_Open_fn;
 		sdrplay_api_Close_t             sdrplay_api_Close_fn;

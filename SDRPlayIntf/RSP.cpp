@@ -28,7 +28,7 @@ namespace SDRPlayIntf
 	std::queue <int> RSP_Access::rsp_input_i;
 	std::queue <int> RSP_Access::rsp_input_q;
 
-	static void streamcbfunc(short* xi, short* xq, sdrplay_api_StreamCbParamsT* params, unsigned int numSamples, unsigned int reset, void* cbContext)
+	static void streamcbfunc_a(short* xi, short* xq, sdrplay_api_StreamCbParamsT* params, unsigned int numSamples, unsigned int reset, void* cbContext)
 	{
 		unsigned int i;
 
@@ -47,9 +47,27 @@ namespace SDRPlayIntf
 			/*write_text_to_log_file("Calling SendDirect");*/
 			SendDirect(*(xi + i), *(xq + i));
 		}
+	}
 
-		//delete _rsp_access;
+	static void streamcbfunc_b(short* xi, short* xq, sdrplay_api_StreamCbParamsT* params, unsigned int numSamples, unsigned int reset, void* cbContext)
+	{
+		unsigned int i;
 
+		if (reset)
+		{
+			if (debug)
+			{
+				char buf[256];
+				sprintf_s(buf, sizeof(buf), "sdrplay_api_StreamACallback: numSamples=%d", numSamples);
+				write_text_to_log_file(buf);
+			}
+		}
+
+		for (i = 0; i < numSamples; i++)
+		{
+			/*write_text_to_log_file("Calling SendDirect");*/
+			SendDirect(*(xi + i), *(xq + i));
+		}
 	}
 
 	static void evcbfunc(sdrplay_api_EventT eventId, sdrplay_api_TunerSelectT tuner, sdrplay_api_EventParamsT* params, void* cbContext)
@@ -166,6 +184,11 @@ namespace SDRPlayIntf
 		_rxstarted = false;
 		chosen_rsp_idx = 255;
 		nDecimateFactor = 16;
+		nGainReduction = 50;
+		nLNAstate = 1;
+		nLastRSPIndex = 999;
+		nAntenna = 0;
+		nHiz = 1;
 	}
 
 	int RSP::LoadApi(void)
@@ -315,7 +338,7 @@ namespace SDRPlayIntf
 		ret = sdrplay_api_Update_fn(chosenDevice->dev, chosenDevice->tuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None);
 		if (ret != sdrplay_api_Success)
 		{
-			rt_exception("sdrplay_api_Update() failed = " + (std::string)sdrplay_api_GetErrorString_fn(ret));
+			rt_exception("sdrplay_api_Update(chosenDevice->dev, chosenDevice->tuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None) failed = " + (std::string)sdrplay_api_GetErrorString_fn(ret));
 			return;
 		}
 	}
@@ -337,7 +360,9 @@ namespace SDRPlayIntf
 		ret = sdrplay_api_GetDeviceParams_fn(chosenDevice->dev, &devparams);
 
 		// Set a sampling frequency
+//		devparams->devParams->fsFreq.fsHz = 2048000.0;
 		devparams->devParams->fsFreq.fsHz = 3072000.0;
+//		devparams->devParams->fsFreq.fsHz = 6144000.0;
 
 		// Get ChannelParams from DeviceParams
 		sdrplay_api_RxChannelParamsT* chParams;
@@ -360,11 +385,21 @@ namespace SDRPlayIntf
 			chParams->ctrlParams.decimation.wideBandSignal = 0;						// 0:Use averaging 1:Use half-band filter
 	
 			chParams->ctrlParams.adsbMode = sdrplay_api_ADSB_DECIMATION;
+
+			if (chosenDevice->hwVer == SDRPLAY_RSP2_ID)
+			{
+				chParams->rsp2TunerParams.antennaSel = (nAntenna == 0) ? sdrplay_api_Rsp2_ANTENNA_A : sdrplay_api_Rsp2_ANTENNA_B;
+				chParams->rsp2TunerParams.amPortSel = (nHiz == 0) ? sdrplay_api_Rsp2_AMPORT_2 : sdrplay_api_Rsp2_AMPORT_1;
+			}
+			if (chosenDevice->hwVer == SDRPLAY_RSPduo_ID)
+			{
+				chParams->rspDuoTunerParams.tuner1AmPortSel = (nHiz == 0) ? sdrplay_api_RspDuo_AMPORT_2 : sdrplay_api_RspDuo_AMPORT_1;
+			}
 		}
 
 		// Set the callback functions
-		cbparams.StreamACbFn = &streamcbfunc;
-		cbparams.StreamBCbFn = NULL;
+		cbparams.StreamACbFn = &streamcbfunc_a;
+		cbparams.StreamBCbFn = &streamcbfunc_b;
 		cbparams.EventCbFn = &evcbfunc;
 
 		ret = sdrplay_api_Init_fn(chosenDevice->dev, &cbparams, NULL);
@@ -377,6 +412,17 @@ namespace SDRPlayIntf
 		if (debug)
 		{
 			write_text_to_log_file("sdrplay_api_Init() succeeded.");
+		}
+
+		// When using RSPdx/RSPdxR2, select the antenna
+		if (chosenDevice->hwVer == SDRPLAY_RSPdx_ID || chosenDevice->hwVer == SDRPLAY_RSPdxR2_ID)
+		{
+			devparams->devParams->rspDxParams.antennaSel = (nAntenna == 0) ? sdrplay_api_RspDx_ANTENNA_A : (nAntenna == 1) ? sdrplay_api_RspDx_ANTENNA_B : sdrplay_api_RspDx_ANTENNA_C;
+			ret = sdrplay_api_Update_fn(chosenDevice->dev, chosenDevice->tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_AntennaControl);
+			if (ret != sdrplay_api_Success)
+			{
+				write_text_to_log_file("sdrplay_api_Update(chosenDevice->dev, chosenDevice->tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_AntennaControl) failed = " + (std::string)sdrplay_api_GetErrorString_fn(ret));
+			}
 		}
 
 		_rxstarted = true;
@@ -533,19 +579,25 @@ namespace SDRPlayIntf
 
 		switch (hwVer)
 		{
-		case 1:
+		case SDRPLAY_RSP1_ID:
 			tempstr2 = "RSP1";
 			break;
-		case 2:
+		case SDRPLAY_RSP2_ID:
 			tempstr2 = "RSP2";
 			break;
-		case 3:
+		case SDRPLAY_RSPdx_ID:
+			tempstr2 = "RSPdx";
+			break;
+		case SDRPLAY_RSPduo_ID:
 			tempstr2 = "RSPDuo";
 			break;
-		case 6:
+		case SDRPLAY_RSP1B_ID:
 			tempstr2 = "RSP1B";
 			break;
-		case 255:
+		case SDRPLAY_RSPdxR2_ID:
+			tempstr2 = "RSPdxR2";
+			break;
+		case SDRPLAY_RSP1A_ID:
 			tempstr2 = "RSP1A";
 			break;
 		default:

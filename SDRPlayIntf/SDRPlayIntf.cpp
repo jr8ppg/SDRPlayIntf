@@ -57,6 +57,8 @@ namespace SDRPlayIntf
 	int nGainReduction = 50;
 	int nLNAstate = 1;
 	int nLastRSPIndex = 999;
+	int nAntenna = 0;
+	int nHiz = 1;
 
 	bool allocated = false;
 
@@ -139,8 +141,8 @@ namespace SDRPlayIntf
 		{
 			if (j != current_rx)
 			{
-				optr[j]->Re = (float)(smplI & 0x7FFF); //psuedo white noise on the inactive virtual receivers
-				optr[j]->Im = (float)(smplQ & 0x7FFF); //psuedo white noise on the inactive virtual receivers
+				optr[j]->Re = (float)(smplI & 0x7FF); //psuedo white noise on the inactive virtual receivers
+				optr[j]->Im = (float)(smplQ & 0x7FF); //psuedo white noise on the inactive virtual receivers
 				(optr[j])++;
 			}
 			else
@@ -248,6 +250,31 @@ namespace SDRPlayIntf
 			ZeroMemory(ret_string, sizeof(ret_string));
 			len = GetPrivateProfileString("General", "RSPIndex", "999", ret_string, 255, ".\\SDRPlayIntf.ini");
 			nLastRSPIndex = atoi(ret_string);
+
+			// RSP2 or RSPDuo or RSPdx or RSPdxR2 to use Antenna B, C
+			ZeroMemory(ret_string, sizeof(ret_string));
+			len = GetPrivateProfileString("General", "Antenna", "A", ret_string, 255, ".\\SDRPlayIntf.ini");
+			if (_stricmp(ret_string, "A") == 0)
+			{
+				nAntenna = 0;
+			}
+			else if (_stricmp(ret_string, "B") == 0)
+			{
+				nAntenna = 1;
+			}
+			else if (_stricmp(ret_string, "C") == 0)
+			{
+				nAntenna = 2;
+			}
+			else
+			{
+				nAntenna = 0;
+			}
+
+			// RSP2 or RSPDuo, set HIZ=1 if you are using the Hi-Z input.
+			ZeroMemory(ret_string, sizeof(ret_string));
+			len = GetPrivateProfileString("General", "HIZ", "1", ret_string, 255, ".\\SDRPlayIntf.ini");
+			nHiz = atoi(ret_string);
 		}
 
 		void SaveSettings(void)
@@ -349,7 +376,7 @@ namespace SDRPlayIntf
 
 			// Show message
 			UINT uiFlags = MB_OK | MB_SETFOREGROUND | MB_SYSTEMMODAL | MB_ICONINFORMATION;
-			int iRet = MessageBoxTimeout(NULL, _T("Version 1.8 using SDRPlay API 3.15"), _T("SDRPlayIntf Info"), uiFlags, 0, 2000);
+			int iRet = MessageBoxTimeout(NULL, _T("Version 1.9 using SDRPlay API 3.15"), _T("SDRPlayIntf Info"), uiFlags, 0, 2000);
 
 			// Allocate buffers & others
 			if (!Alloc(decimate_table[gSet.RateID].fSampleRate))
@@ -369,6 +396,8 @@ namespace SDRPlayIntf
 			myRSP.nDecimateFactor = decimate_table[gSet.RateID].nDecimateFactor;
 			myRSP.nGainReduction = nGainReduction;
 			myRSP.nLNAstate = nLNAstate;
+			myRSP.nAntenna = nAntenna;
+			myRSP.nHiz = nHiz;
 			myRSP.StartRx();
 
 			// Start worker thread
