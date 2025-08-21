@@ -56,12 +56,14 @@ namespace SDRPlayIntf
 	int nRotationInterval = 2;
 	int nGainReduction = 50;
 	int nLNAstate = 1;
-	int nLastRSPIndex = 999;
+	char szLastRspSerial[SDRPLAY_MAX_SER_NO_LEN];
 	int nAntenna = 0;
 	int nHiz = 1;
 
 	bool allocated = false;
 
+	char szModuleFileName[MAX_PATH];
+	char szSkimSrvName[MAX_PATH];
 	char szSkimSrvIni[MAX_PATH];
 	char szSkimSrvLog[MAX_PATH];
 	char szSkimSrvFolder[MAX_PATH];
@@ -90,7 +92,6 @@ namespace SDRPlayIntf
 				if (gData[i] != NULL) {
 					free(gData[i]);
 				}
-
 				gData[i] = NULL;
 			}
 
@@ -120,6 +121,7 @@ namespace SDRPlayIntf
 
 			gDataSamples = 0;
 		}
+
 		allocated = true;
 
 		// success
@@ -171,7 +173,7 @@ namespace SDRPlayIntf
 		}
 	}
 
-	extern "C" 
+	extern "C"
 	{
 		void LoadSettings(void);
 		void SaveSettings(void);
@@ -179,27 +181,56 @@ namespace SDRPlayIntf
 		BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 		{
 			char szBuffer[MAX_PATH];
+			char* p = NULL;
 
 			switch (ul_reason_for_call)
 			{
 				case DLL_PROCESS_ATTACH:
 
+					// Get the full path of the EXE
+					GetModuleFileName(NULL, szBuffer, sizeof(szBuffer));
+					strcpy_s(szModuleFileName, sizeof(szModuleFileName), szBuffer);
+
+					// Extracting the EXE name from the full path
+					p = strrchr(szModuleFileName, '\\');
+					if (p != NULL)
+					{
+						strcpy(szSkimSrvName, p + 1);
+					}
+					else
+					{
+						strcpy(szSkimSrvName, "SkimSrv.exe");
+					}
+
+					// Remove the extension
+					p = strchr(szSkimSrvName, '.');
+					if (p != NULL)
+					{
+						*p = '\0';
+					}
+
+					// Build the folder name for AppData
 					ExpandEnvironmentStrings("%APPDATA%", szBuffer, sizeof(szBuffer));
-					strcpy_s(szSkimSrvFolder, sizeof(szSkimSrvFolder), szBuffer);
-					strcat_s(szSkimSrvFolder, sizeof(szSkimSrvFolder), "\\Afreet\\Products\\SkimSrv\\");
+					sprintf_s(szSkimSrvFolder, sizeof(szSkimSrvFolder), "%s\\Afreet\\Products\\%s\\", szBuffer, szSkimSrvName);
 
-					strcpy_s(szSkimSrvIni, sizeof(szSkimSrvIni), szSkimSrvFolder);
-					strcat_s(szSkimSrvIni, sizeof(szSkimSrvIni), "SkimSrv.ini");
+					// Build the full path of the INI file
+					sprintf_s(szSkimSrvIni, sizeof(szSkimSrvIni), "%s%s.ini", szSkimSrvFolder, szSkimSrvName);
 
-					strcpy_s(szSkimSrvLog, sizeof(szSkimSrvLog), szSkimSrvFolder);
-					strcat_s(szSkimSrvLog, sizeof(szSkimSrvLog), "SDRPlayIntf_log_file.txt");
+					// Build the log file name
+					sprintf_s(szSkimSrvLog, sizeof(szSkimSrvLog), "%sSDRPlayIntf_log_file.txt", szSkimSrvFolder);
 
+					// Read settings from an ini file
 					LoadSettings();
 
+					write_text_to_log_file("ModuleFileName   = " + std::string(szModuleFileName));
+					write_text_to_log_file("SkimSrvName      = " + std::string(szSkimSrvName));
+					write_text_to_log_file("SkimSrvFolder    = " + std::string(szSkimSrvFolder));
+					write_text_to_log_file("SkimSrvIni       = " + std::string(szSkimSrvIni));
 					write_text_to_log_file("RotationInterval = " + std::to_string(nRotationInterval));
 					write_text_to_log_file("GainReduction    = " + std::to_string(nGainReduction));
 					write_text_to_log_file("LNAstate         = " + std::to_string(nLNAstate));
-					write_text_to_log_file("LastRSPIndex     = " + std::to_string(nLastRSPIndex));
+					write_text_to_log_file("LastRspSerial    = " + std::string(szLastRspSerial));
+
 					if (debug)
 					{
 						write_text_to_log_file("debug on");
@@ -246,10 +277,11 @@ namespace SDRPlayIntf
 			len = GetPrivateProfileString("General", "LNAstate", "1", ret_string, 255, ".\\SDRPlayIntf.ini");
 			nLNAstate = atoi(ret_string);
 
-			// Get the previous chosen device number
+			// Get the previous chosen device serial
 			ZeroMemory(ret_string, sizeof(ret_string));
-			len = GetPrivateProfileString("General", "RSPIndex", "999", ret_string, 255, ".\\SDRPlayIntf.ini");
-			nLastRSPIndex = atoi(ret_string);
+			ZeroMemory(szLastRspSerial, sizeof(szLastRspSerial));
+			len = GetPrivateProfileString("General", "RSPSerial", "", ret_string, 255, ".\\SDRPlayIntf.ini");
+			strncpy(szLastRspSerial, ret_string, sizeof(szLastRspSerial));
 
 			// RSP2 or RSPDuo or RSPdx or RSPdxR2 to use Antenna B, C
 			ZeroMemory(ret_string, sizeof(ret_string));
@@ -279,28 +311,18 @@ namespace SDRPlayIntf
 
 		void SaveSettings(void)
 		{
-			char buffer[255];
-
-			sprintf_s(buffer, sizeof(buffer), "%d", nLastRSPIndex);
-			WritePrivateProfileString("General", "RSPIndex", buffer, ".\\SDRPlayIntf.ini");
+			WritePrivateProfileString("General", "RSPSerial", szLastRspSerial, ".\\SDRPlayIntf.ini");
 		}
 
 		DLLEXPORT void __stdcall GetSdrInfo(PSdrInfo pInfo)
 		{
-			// did we get info ?
-			if (pInfo == NULL) return;
-
-			for (int i = 0; i < MAX_RX_COUNT; i++) {
-				gData[i] = NULL;
+			if (debug)
+			{
+				write_text_to_log_file("--- BEGIN GetSdrInfo() ---");
 			}
 
-			// RSP test code
-			strcpy(display_name, "SDRPlay RSP");
-			pInfo->MaxRecvCount = 5;
-			pInfo->ExactRates[RATE_48KHZ] = 48e3;
-			pInfo->ExactRates[RATE_96KHZ] = 96e3;
-			pInfo->ExactRates[RATE_192KHZ] = 192e3;
-			pInfo->DeviceName = display_name;
+			// did we get info ?
+			if (pInfo == NULL) return;
 
 			if (debug)
 			{
@@ -311,7 +333,22 @@ namespace SDRPlayIntf
 			if (myRSP.LoadApi() == false) //failed
 			{
 				rt_exception("myRSP.LoadApi failed");
+				return;
 			}
+
+			// Enumerate devices and select one
+			myRSP.nRecvCount = gSet.RecvCount;
+			strncpy(myRSP.szLastRspSerial, szLastRspSerial, sizeof(szLastRspSerial));
+
+			myRSP.GetDevices();
+
+			if (myRSP.chosen_rsp_idx == 255)
+			{
+				rt_exception("Can't locate RSP device");
+				return;
+			}
+
+			strncpy(szLastRspSerial, myRSP.szLastRspSerial, sizeof(szLastRspSerial));
 
 			// Create the timer queue.
 			if (hTimerQueue == NULL)
@@ -323,6 +360,16 @@ namespace SDRPlayIntf
 				write_text_to_log_file("CreateTimerQueue failed = " + std::to_string(GetLastError()));
 			}
 
+			// Build a my device name from the device name and serial number obtained
+			sprintf_s(display_name, sizeof(display_name), "SDRPlay %s(%s)", myRSP.szDeviceName, myRSP.szLastRspSerial);
+
+			// Set this RSP information
+			pInfo->MaxRecvCount = 5;
+			pInfo->ExactRates[RATE_48KHZ] = 48e3;
+			pInfo->ExactRates[RATE_96KHZ] = 96e3;
+			pInfo->ExactRates[RATE_192KHZ] = 192e3;
+			pInfo->DeviceName = display_name;
+
 			return;
 		}
 
@@ -332,11 +379,23 @@ namespace SDRPlayIntf
 			int gNChan;
 			int i;
 
+			if (debug)
+			{
+				write_text_to_log_file("--- BEGIN StartRx() ---");
+			}
+
 			// Sample rate of Skimmer server
 			double fSampleRate = 0;
 
 			// have we settings ?
-			if (pSettings == NULL) return;
+			if (pSettings == NULL)
+			{
+				if (debug)
+				{
+					write_text_to_log_file("pSettings is null");
+				}
+				return;
+			}
 
 			// make a copy of SDR settings
 			memcpy(&gSet, pSettings, sizeof(gSet));
@@ -348,7 +407,6 @@ namespace SDRPlayIntf
 				write_text_to_log_file("StartRx RecvCount = " + std::to_string(gSet.RecvCount));
 			}
 
-
 			// from skimmer server version 1.1 in high bytes is something strange
 			gSet.RateID &= 0xFF;
 
@@ -356,17 +414,6 @@ namespace SDRPlayIntf
 			{
 				write_text_to_log_file("RateID = " + std::to_string(gSet.RateID));
 			}
-
-			// Enumerate devices and select one
-			myRSP.GetDevices();
-
-			if (myRSP.chosen_rsp_idx == 255)
-			{
-				rt_exception("Can't locate RSP device");
-				return;
-			}
-
-			nLastRSPIndex = myRSP.nLastRSPIndex;
 
 			// Adjust Rate ID
 			if (gSet.RateID < 0 || gSet.RateID > 2)
@@ -385,12 +432,10 @@ namespace SDRPlayIntf
 				return;
 			}
 
-			// Prepare pointers to IQ buffer
-			gDataSamples = 0;
-
 			for (i = 0; i < gNChan; i++) {
 				optr[i] = gData[i];
 			}
+			gDataSamples = 0;
 
 			// Start RX
 			myRSP.nDecimateFactor = decimate_table[gSet.RateID].nDecimateFactor;
@@ -402,6 +447,11 @@ namespace SDRPlayIntf
 
 			// Start worker thread
 			gStopFlag = false;		
+
+			if (debug)
+			{
+				write_text_to_log_file("--- END StartRx() ---");
+			}
 		}
 
 		DLLEXPORT void __stdcall StopRx(void) 
@@ -444,15 +494,30 @@ namespace SDRPlayIntf
 			}
 
 			Stop_Rotation();
+			if (debug)
+			{
+				write_text_to_log_file("before sleep");
+			}
+
 			Sleep(100);
 
+			if (debug)
+			{
+				write_text_to_log_file("before set freq");
+			}
+
 			frequencies[Receiver] = (double)Frequency;
+
+			if (debug)
+			{
+				write_text_to_log_file("after set freq");
+			}
 
 			num_frequencies = Receiver + 1;
 
 			if (debug)
 			{
-				write_text_to_log_file("num_frequencies = " + std::to_string(num_frequencies) + " rotating = ");
+				write_text_to_log_file("num_frequencies = " + std::to_string(num_frequencies) + " rotating = " + std::to_string(rotating));
 			}
 
 			if ((num_frequencies > 1) && (!rotating))
@@ -463,9 +528,8 @@ namespace SDRPlayIntf
 			if (Receiver == 0) // Other receivers set by timer
 			{
 				current_rx = Receiver;
-				myRSP.SetFreq((double)frequencies[Receiver]);
+				myRSP.SetFreq(Receiver, (double)frequencies[Receiver]);
 			}
-			
 		}
 
 		DLLEXPORT int __stdcall ReadPort(int PortNumber)
@@ -523,6 +587,11 @@ namespace SDRPlayIntf
 
 		if (debug)
 		{
+			write_text_to_log_file("--- begin -- StopRotation() ---");
+		}
+
+		if (debug)
+		{
 			sprintf_s(buffer, sizeof(buffer), "Entering Stop_Rotation hTimer = %p", hTimer);
 			write_text_to_log_file(buffer);
 		}
@@ -543,6 +612,11 @@ namespace SDRPlayIntf
 				write_text_to_log_file("Rotation stopped");
 			}
 		}
+
+		if (debug)
+		{
+			write_text_to_log_file("--- leave -- StopRotation() ---");
+		}
 	}
 
 	VOID CALLBACK TimerRoutine(PVOID lpParam, BOOLEAN TimerOrWaitFired)
@@ -560,7 +634,7 @@ namespace SDRPlayIntf
 		}
 
 		// set new frequency
-		myRSP.SetFreq((double)frequencies[current_rx]);
+		myRSP.SetFreq(current_rx, (double)frequencies[current_rx]);
 	}
 
 	void write_text_to_log_file( const std::string &text )

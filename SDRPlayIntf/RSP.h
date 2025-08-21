@@ -29,14 +29,16 @@ namespace SDRPlayIntf
 		void StartRx();
 		void StopRx(void);
 		void GetDevices(void);
-		void SetFreq(double);
+		void SetFreq(int Receiver, double freq);
 		int nDecimateFactor;
 		int nGainReduction;
 		int nLNAstate;
-		int nLastRSPIndex;
-		int chosen_rsp_idx;
+		char szLastRspSerial[SDRPLAY_MAX_SER_NO_LEN];
+		char szDeviceName[50];
 		int nAntenna;
 		int nHiz;
+		int nRecvCount;
+		int chosen_rsp_idx;
 	private:
 		sdrplay_api_Open_t              sdrplay_api_Open_fn;
 		sdrplay_api_Close_t             sdrplay_api_Close_fn;
@@ -50,12 +52,16 @@ namespace SDRPlayIntf
 		sdrplay_api_ReleaseDevice_t     sdrplay_api_ReleaseDevice_fn;
 		sdrplay_api_GetErrorString_t    sdrplay_api_GetErrorString_fn;
 		sdrplay_api_Update_t			sdrplay_api_Update_fn;
+		sdrplay_api_ApiVersion_t		sdrplay_api_ApiVersion_fn;
 
 		sdrplay_api_DeviceT devices_found[10];
 		sdrplay_api_CallbackFnsT cbparams;
 		double _rspfreq;
 		bool _rxstarted;
 
+		int GetRspIndexBySerial(char* szSerial);
 		std::string GetRspName(int hwVer);
+		void SetTunerParams(unsigned char hwVer, sdrplay_api_RxChannelParamsT *chParams, double rxfreq);
+		void SetTunerFreq(unsigned char hwVer, sdrplay_api_RxChannelParamsT *chParams, double rxfreq);
 	};
 }

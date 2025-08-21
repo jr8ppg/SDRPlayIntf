@@ -37,7 +37,7 @@ namespace SDRPlayIntf
 			if (debug)
 			{
 				char buf[256];
-				sprintf_s(buf, sizeof(buf), "sdrplay_api_StreamACallback: numSamples=%d", numSamples);
+				sprintf_s(buf, sizeof(buf), "sdrplay_api_StreamACallback: numSamples=%d, hwver=%d", numSamples, ((sdrplay_api_DeviceT*)cbContext)->hwVer);
 				write_text_to_log_file(buf);
 			}
 		}
@@ -58,7 +58,7 @@ namespace SDRPlayIntf
 			if (debug)
 			{
 				char buf[256];
-				sprintf_s(buf, sizeof(buf), "sdrplay_api_StreamACallback: numSamples=%d", numSamples);
+				sprintf_s(buf, sizeof(buf), "sdrplay_api_StreamBCallback: numSamples=%d, hwver=%d", numSamples, ((sdrplay_api_DeviceT*)cbContext)->hwVer);
 				write_text_to_log_file(buf);
 			}
 		}
@@ -74,35 +74,64 @@ namespace SDRPlayIntf
 	{
 		switch (eventId)
 		{
-			case sdrplay_api_GainChange:
-				if (debug)
+		case sdrplay_api_GainChange:
+			if (debug)
+			{
+				char buf[256];
+				sprintf_s(buf, sizeof(buf), "sdrplay_api_GainChange: %f", params->gainParams.currGain);
+				write_text_to_log_file(buf);
+			}
+			break;
+		case sdrplay_api_PowerOverloadChange:
+			if (debug)
+			{
+				if (params->powerOverloadParams.powerOverloadChangeType == sdrplay_api_Overload_Detected)
 				{
-					char buf[256];
-					sprintf_s(buf, sizeof(buf), "sdrplay_api_GainChange: %f", params->gainParams.currGain);
-					write_text_to_log_file(buf);
+					write_text_to_log_file("sdrplay_api_PowerOverloadChange detected");
 				}
-				break;
-			case sdrplay_api_PowerOverloadChange:
-				if (debug)
+				else
 				{
-					if (params->powerOverloadParams.powerOverloadChangeType == sdrplay_api_Overload_Detected)
-					{
-						write_text_to_log_file("sdrplay_api_PowerOverloadChange detected");
-					}
-					else
-					{
-						write_text_to_log_file("sdrplay_api_PowerOverloadChange corrected");
-					}
+					write_text_to_log_file("sdrplay_api_PowerOverloadChange corrected");
 				}
-				break;
-			case sdrplay_api_DeviceRemoved:
-				break;
-			default:
-				break;
+			}
+			break;
+		case sdrplay_api_RspDuoModeChange:
+			if (debug)
+			{
+				char buf[256];
+				sprintf_s(buf, 256, "sdrplay_api_EventCb: %s, tuner=%s modeChangeType=%s",
+					"sdrplay_api_RspDuoModeChange", (tuner == sdrplay_api_Tuner_A) ?
+					"sdrplay_api_Tuner_A" : "sdrplay_api_Tuner_B",
+					(params->rspDuoModeParams.modeChangeType == sdrplay_api_MasterInitialised) ?
+					"sdrplay_api_MasterInitialised" :
+					(params->rspDuoModeParams.modeChangeType == sdrplay_api_SlaveAttached) ?
+					"sdrplay_api_SlaveAttached" :
+					(params->rspDuoModeParams.modeChangeType == sdrplay_api_SlaveDetached) ?
+					"sdrplay_api_SlaveDetached" :
+					(params->rspDuoModeParams.modeChangeType == sdrplay_api_SlaveInitialised) ?
+					"sdrplay_api_SlaveInitialised" :
+					(params->rspDuoModeParams.modeChangeType == sdrplay_api_SlaveUninitialised) ?
+					"sdrplay_api_SlaveUninitialised" :
+					(params->rspDuoModeParams.modeChangeType == sdrplay_api_MasterDllDisappeared) ?
+					"sdrplay_api_MasterDllDisappeared" :
+					(params->rspDuoModeParams.modeChangeType == sdrplay_api_SlaveDllDisappeared) ?
+					"sdrplay_api_SlaveDllDisappeared" : "unknown type");
+				write_text_to_log_file(buf);
+
+				//if (params->rspDuoModeParams.modeChangeType == sdrplay_api_MasterInitialised)
+				//	masterInitialised = 1;
+				//if (params->rspDuoModeParams.modeChangeType == sdrplay_api_SlaveUninitialised)
+				//	slaveUninitialised = 1;
+			}
+			break;
+		case sdrplay_api_DeviceRemoved:
+			break;
+		default:
+			break;
 		}
 	}
 
-	static void gccbfunc(unsigned int gRdB, unsigned int lnaGRdB, void *cbContext)
+	static void gccbfunc(unsigned int gRdB, unsigned int lnaGRdB, void* cbContext)
 	{
 
 	}
@@ -186,58 +215,100 @@ namespace SDRPlayIntf
 		nDecimateFactor = 16;
 		nGainReduction = 50;
 		nLNAstate = 1;
-		nLastRSPIndex = 999;
+		memset(szLastRspSerial, 0, sizeof(szLastRspSerial));
+		memset(szDeviceName, 0, sizeof(szDeviceName));
 		nAntenna = 0;
 		nHiz = 1;
+		nRecvCount = 0;
 	}
 
-	int RSP::LoadApi(void)
+	std::string GetSdrPlayApiGlobalInstallPath()
 	{
-		// Load API addresses into memory
+		HKEY APIkey;
 		char APIkeyValue[1024];
-		wchar_t APIVersion[1024];
 		char tmpStringA[1024];
 		DWORD APIkeyValue_length = sizeof(APIkeyValue);
-		DWORD APIVersion_length = sizeof(APIVersion);
-		HKEY APIkey;
 		int error;
-		sdrplay_api_ErrT ret;
-
-		if (debug)
-		{
-			write_text_to_log_file("begin - RSP::LoadAPI()");
-		}
 
 		if (RegOpenKey(HKEY_LOCAL_MACHINE, "SOFTWARE\\SDRPlay\\Service\\API", &APIkey) != ERROR_SUCCESS)
 		{
 			error = GetLastError();
 			MessageBox(NULL, "SDRPlay API Not Installed", "Install 3.15 API from SDRPlay web site", MB_OK | MB_ICONEXCLAMATION);
 			rt_exception("Failed to locate API registry entry error = " + error);
-			return false;
+			return std::string("");
 		}
-		else
-		{
-			RegQueryValueEx(APIkey, "Install_Dir", NULL, NULL, (LPBYTE)&APIkeyValue, &APIkeyValue_length);
-			RegQueryValueEx(APIkey, "Version", NULL, NULL, (LPBYTE)&APIVersion, &APIVersion_length);
-			RegCloseKey(APIkey);
-		}
+
+		RegQueryValueEx(APIkey, "Install_Dir", NULL, NULL, (LPBYTE)&APIkeyValue, &APIkeyValue_length);
+		//RegQueryValueEx(APIkey, "Version", NULL, NULL, (LPBYTE)&APIVersion, &APIVersion_length);
+		RegCloseKey(APIkey);
 
 #ifndef _WIN64
 		sprintf_s(tmpStringA, sizeof(tmpStringA), "%s\\x86\\sdrplay_api.dll", APIkeyValue);
 #else
 		sprintf_s(tmpStringA, 8192, "%s\\x64\\sdrplay_api.dll", APIkeyValue);
 #endif
-		LPCSTR ApiDllName = (LPCSTR)tmpStringA;
+		//LPCSTR ApiDllName = (LPCSTR)tmpStringA;
+		std::string apipath = std::string((LPCSTR)tmpStringA);
 
-		sprintf_s(Version, sizeof(Version), "%ls", APIVersion);
+		return(apipath);
+	}
 
+	std::string GetSdrPlayApiLocalInstallPath()
+	{
+		char* p = NULL;
+		char szBuffer[MAX_PATH];
+		char szApiFileName[MAX_PATH];
+
+		GetModuleFileName(NULL, szBuffer, sizeof(szBuffer));
+		strcpy_s(szApiFileName, sizeof(szApiFileName), szBuffer);
+
+		p = strrchr(szApiFileName, '\\');
+		if (p != NULL)
+		{
+			*(p + 1) = '\0';
+		}
+		else
+		{
+			szApiFileName[0] = '\0';
+		}
+
+		strcat_s(szApiFileName, sizeof(szApiFileName), "sdrplay_api.dll");
+
+		std::string apipath = std::string(szApiFileName);
+
+		return(apipath);
+	}
+
+	int RSP::LoadApi(void)
+	{
+		std::string apipath;
+		int error;
+		sdrplay_api_ErrT ret;
+		float apiver = 0;
+
+		if (debug)
+		{
+			write_text_to_log_file("BEGIN - RSP::LoadAPI()");
+		}
+
+		apipath = GetSdrPlayApiLocalInstallPath();
+
+		if (debug)
+		{
+			write_text_to_log_file("local api path = " + apipath);
+		}
+
+		ApiDll = LoadLibrary(apipath.c_str());
 		if (ApiDll == NULL)
 		{
-			ApiDll = LoadLibrary(ApiDllName);
-			if (ApiDll == NULL)
+			apipath = GetSdrPlayApiGlobalInstallPath();
+
+			if (debug)
 			{
-				ApiDll = LoadLibrary("sdrplay_api.dll");
+				write_text_to_log_file("global api path = " + apipath);
 			}
+
+			ApiDll = LoadLibrary(apipath.c_str());
 			if (ApiDll == NULL)
 			{
 				error = GetLastError();
@@ -246,14 +317,7 @@ namespace SDRPlayIntf
 			}
 		}
 
-		if (debug)
-		{
-			std::string str(Version);
-			std::string str2(ApiDllName);
-			write_text_to_log_file("ApiDllName = " + str2);
-			write_text_to_log_file("API Version = " + str);
-		}
-
+		// Get the address of each API function
 		sdrplay_api_Open_fn = (sdrplay_api_Open_t)GetProcAddress(ApiDll, "sdrplay_api_Open");
 		sdrplay_api_Close_fn = (sdrplay_api_Close_t)GetProcAddress(ApiDll, "sdrplay_api_Close");
 		sdrplay_api_GetDeviceParams_fn = (sdrplay_api_GetDeviceParams_t)GetProcAddress(ApiDll, "sdrplay_api_GetDeviceParams");
@@ -266,6 +330,7 @@ namespace SDRPlayIntf
 		sdrplay_api_ReleaseDevice_fn = (sdrplay_api_ReleaseDevice_t)GetProcAddress(ApiDll, "sdrplay_api_ReleaseDevice");
 		sdrplay_api_GetErrorString_fn = (sdrplay_api_GetErrorString_t)GetProcAddress(ApiDll, "sdrplay_api_GetErrorString");
 		sdrplay_api_Update_fn = (sdrplay_api_Update_t)GetProcAddress(ApiDll, "sdrplay_api_Update");
+		sdrplay_api_ApiVersion_fn = (sdrplay_api_ApiVersion_t)GetProcAddress(ApiDll, "sdrplay_api_ApiVersion");
 
 		if ((sdrplay_api_Open_fn == NULL) ||
 			(sdrplay_api_Close_fn == NULL) ||
@@ -277,13 +342,15 @@ namespace SDRPlayIntf
 			(sdrplay_api_GetDevices_fn == NULL) ||
 			(sdrplay_api_SelectDevice_fn == NULL) ||
 			(sdrplay_api_ReleaseDevice_fn == NULL) ||
-			(sdrplay_api_Update_fn == NULL))
+			(sdrplay_api_Update_fn == NULL) ||
+			(sdrplay_api_ApiVersion_fn == NULL))
 		{
 			rt_exception("Failed to set function pointers for mir API functions");
 			FreeLibrary(ApiDll);
 			return false;
 		}
 
+		// Open the SDRPlay API
 		ret = sdrplay_api_Open_fn();
 		if (ret == sdrplay_api_Success)
 		{
@@ -296,18 +363,19 @@ namespace SDRPlayIntf
 
 		if (debug)
 		{
-			write_text_to_log_file("end - RSP::LoadAPI()");
+			sdrplay_api_ApiVersion_fn(&apiver);
+			write_text_to_log_file("***** SDRPlay API Version = " + std::to_string(apiver) + " *****");
+
+			write_text_to_log_file("END - RSP::LoadAPI()");
 		}
 
 		return true;
 	}
 
-	void RSP::SetFreq(double freq)
+	void RSP::SetFreq(int Receiver, double freq)
 	{
 		sdrplay_api_ErrT ret;
-
-		// save a new frequency
-		_rspfreq = freq;
+		sdrplay_api_TunerSelectT selTuner;
 
 		if (_rxstarted == false)
 		{
@@ -316,7 +384,11 @@ namespace SDRPlayIntf
 
 		if (debug)
 		{
-			write_text_to_log_file("Setting RSP frequency to " + std::to_string(freq));
+			char buffer[256];
+
+			write_text_to_log_file("****** begin - RSP::SetFreq() ******");
+			sprintf_s(buffer, 256, "Setting RSP frequency[%d] to %f", Receiver, freq);
+			write_text_to_log_file(buffer);
 		}
 
 		// Get device information for the chosen device
@@ -326,30 +398,33 @@ namespace SDRPlayIntf
 		sdrplay_api_DeviceParamsT* devparams;
 		ret = sdrplay_api_GetDeviceParams_fn(chosenDevice->dev, &devparams);
 
-		// Get ChannelParams from DeviceParams
-		sdrplay_api_RxChannelParamsT* chParams;
-		chParams = (chosenDevice->tuner == sdrplay_api_Tuner_B) ? devparams->rxChannelB : devparams->rxChannelA;
-		if (chParams != NULL)
-		{
-			chParams->tunerParams.rfFreq.rfHz = _rspfreq;		// set a new frequency
-		}
+		// Set to new frequency
+		_rspfreq = freq;
+		selTuner = sdrplay_api_Tuner_A;
+		SetTunerFreq(chosenDevice->hwVer, devparams->rxChannelA, _rspfreq);
 
 		// Update the frequency of the chosen device
-		ret = sdrplay_api_Update_fn(chosenDevice->dev, chosenDevice->tuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None);
+		ret = sdrplay_api_Update_fn(chosenDevice->dev, selTuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None);
 		if (ret != sdrplay_api_Success)
 		{
 			rt_exception("sdrplay_api_Update(chosenDevice->dev, chosenDevice->tuner, sdrplay_api_Update_Tuner_Frf, sdrplay_api_Update_Ext1_None) failed = " + (std::string)sdrplay_api_GetErrorString_fn(ret));
 			return;
 		}
+
+		if (debug)
+		{
+			write_text_to_log_file("_rspfreq    = " + std::to_string(_rspfreq));
+			write_text_to_log_file("****** end - RSP::SetFreq() ******");
+		}
 	}
-	
+
 	void RSP::StartRx()
 	{
 		sdrplay_api_ErrT ret;
 
 		if (debug)
 		{
-			write_text_to_log_file("****** begin - StartRx() ******");
+			write_text_to_log_file("****** begin - StartRx() ****** chosen_rsp_idx=" + std::to_string(chosen_rsp_idx));
 		}
 
 		// Get device information for the chosen device
@@ -358,51 +433,30 @@ namespace SDRPlayIntf
 		// Get DeviceParams from chosen device
 		sdrplay_api_DeviceParamsT* devparams;
 		ret = sdrplay_api_GetDeviceParams_fn(chosenDevice->dev, &devparams);
+		if (ret != sdrplay_api_Success)
+		{
+			rt_exception("sdrplay_api_GetDeviceParams() failed = " + (std::string)sdrplay_api_GetErrorString_fn(ret));
+			return;
+		}
+
+		if (devparams == NULL)
+		{
+			rt_exception("devparams is null");
+			return;
+		}
 
 		// Set a sampling frequency
-//		devparams->devParams->fsFreq.fsHz = 2048000.0;
 		devparams->devParams->fsFreq.fsHz = 3072000.0;
-//		devparams->devParams->fsFreq.fsHz = 6144000.0;
 
-		// Get ChannelParams from DeviceParams
-		sdrplay_api_RxChannelParamsT* chParams;
-		chParams = (chosenDevice->tuner == sdrplay_api_Tuner_B) ? devparams->rxChannelB : devparams->rxChannelA;
-		if (chParams != NULL)
-		{
-			chParams->tunerParams.rfFreq.rfHz = _rspfreq;			// receive frequency
-			chParams->tunerParams.bwType = sdrplay_api_BW_0_200;
-			chParams->tunerParams.ifType = sdrplay_api_IF_Zero;
-			chParams->tunerParams.gain.gRdB = nGainReduction;
-			chParams->tunerParams.gain.LNAstate = nLNAstate;
-			chParams->tunerParams.gain.minGr = sdrplay_api_NORMAL_MIN_GR;
-
-			// Disable AGC
-			chParams->ctrlParams.agc.enable = sdrplay_api_AGC_DISABLE;
-
-			// Decimation
-			chParams->ctrlParams.decimation.enable = 1;
-			chParams->ctrlParams.decimation.decimationFactor = nDecimateFactor;		// 2, 4, 8, 16 or 32 only
-			chParams->ctrlParams.decimation.wideBandSignal = 0;						// 0:Use averaging 1:Use half-band filter
-	
-			chParams->ctrlParams.adsbMode = sdrplay_api_ADSB_DECIMATION;
-
-			if (chosenDevice->hwVer == SDRPLAY_RSP2_ID)
-			{
-				chParams->rsp2TunerParams.antennaSel = (nAntenna == 0) ? sdrplay_api_Rsp2_ANTENNA_A : sdrplay_api_Rsp2_ANTENNA_B;
-				chParams->rsp2TunerParams.amPortSel = (nHiz == 0) ? sdrplay_api_Rsp2_AMPORT_2 : sdrplay_api_Rsp2_AMPORT_1;
-			}
-			if (chosenDevice->hwVer == SDRPLAY_RSPduo_ID)
-			{
-				chParams->rspDuoTunerParams.tuner1AmPortSel = (nHiz == 0) ? sdrplay_api_RspDuo_AMPORT_2 : sdrplay_api_RspDuo_AMPORT_1;
-			}
-		}
+		// Set the ChannelParams
+		SetTunerParams(chosenDevice->hwVer, devparams->rxChannelA, _rspfreq);
 
 		// Set the callback functions
 		cbparams.StreamACbFn = &streamcbfunc_a;
 		cbparams.StreamBCbFn = &streamcbfunc_b;
 		cbparams.EventCbFn = &evcbfunc;
 
-		ret = sdrplay_api_Init_fn(chosenDevice->dev, &cbparams, NULL);
+		ret = sdrplay_api_Init_fn(chosenDevice->dev, &cbparams, chosenDevice);
 		if (ret != sdrplay_api_Success)
 		{
 			rt_exception("sdrplay_api_Init() failed = " + (std::string)sdrplay_api_GetErrorString_fn(ret));
@@ -435,6 +489,41 @@ namespace SDRPlayIntf
 		}
 	}
 
+	void RSP::SetTunerParams(unsigned char hwVer, sdrplay_api_RxChannelParamsT *chParams, double rxfreq)
+	{
+		chParams->tunerParams.rfFreq.rfHz = rxfreq;			// receive frequency
+		chParams->tunerParams.bwType = sdrplay_api_BW_0_200;
+		chParams->tunerParams.ifType = sdrplay_api_IF_Zero;
+		chParams->tunerParams.gain.gRdB = nGainReduction;
+		chParams->tunerParams.gain.LNAstate = nLNAstate;
+		chParams->tunerParams.gain.minGr = sdrplay_api_NORMAL_MIN_GR;
+
+		// Disable AGC
+		chParams->ctrlParams.agc.enable = sdrplay_api_AGC_5HZ;// sdrplay_api_AGC_DISABLE;
+
+		// Decimation
+		chParams->ctrlParams.decimation.enable = 1;
+		chParams->ctrlParams.decimation.decimationFactor = nDecimateFactor;		// 2, 4, 8, 16 or 32 only
+		chParams->ctrlParams.decimation.wideBandSignal = 0;						// 0:Use averaging 1:Use half-band filter
+
+		chParams->ctrlParams.adsbMode = sdrplay_api_ADSB_DECIMATION;
+
+		if (hwVer == SDRPLAY_RSP2_ID)
+		{
+			chParams->rsp2TunerParams.antennaSel = (nAntenna == 0) ? sdrplay_api_Rsp2_ANTENNA_A : sdrplay_api_Rsp2_ANTENNA_B;
+			chParams->rsp2TunerParams.amPortSel = (nHiz == 0) ? sdrplay_api_Rsp2_AMPORT_2 : sdrplay_api_Rsp2_AMPORT_1;
+		}
+		if (hwVer == SDRPLAY_RSPduo_ID)
+		{
+			chParams->rspDuoTunerParams.tuner1AmPortSel = (nHiz == 0) ? sdrplay_api_RspDuo_AMPORT_2 : sdrplay_api_RspDuo_AMPORT_1;
+		}
+	}
+
+	void RSP::SetTunerFreq(unsigned char hwVer, sdrplay_api_RxChannelParamsT *chParams, double rxfreq)
+	{
+		chParams->tunerParams.rfFreq.rfHz = rxfreq;
+	}
+
 	void RSP::StopRx()
 	{
 		sdrplay_api_ErrT ret;
@@ -461,7 +550,6 @@ namespace SDRPlayIntf
 	void RSP::GetDevices()
 	{
 		sdrplay_api_ErrT ret;
-		int mb_ret;
 		unsigned int i;
 		unsigned num_found = 0;
 		unsigned max = 10;
@@ -495,12 +583,20 @@ namespace SDRPlayIntf
 
 		if (debug)
 		{
-			write_text_to_log_file("num_found " + std::to_string(num_found));
+			char buffer[256];
+			write_text_to_log_file("num of devices = " + std::to_string(num_found));
 
 			for (i = 0; i < num_found; i++)
 			{
-				write_text_to_log_file("hwVer " + std::to_string(devices_found[i].hwVer));
-				write_text_to_log_file(devices_found[i].SerNo);
+				std::string hwnm = GetRspName(devices_found[i].hwVer);
+				if (devices_found[i].hwVer == SDRPLAY_RSPduo_ID)
+				{
+					sprintf_s(buffer, sizeof(buffer), "Dev%d: SerNo=%s hwVer=%s(%d) tuner=0x%.2x rspDuoMode=0x%.2x", i, devices_found[i].SerNo, hwnm.c_str(), devices_found[i].hwVer, devices_found[i].tuner, devices_found[i].rspDuoMode);
+				}
+				else {
+					sprintf_s(buffer, sizeof(buffer), "Dev%d: SerNo=%s hwVer=%s(%d) tuner=0x%.2x", i, devices_found[i].SerNo, hwnm.c_str(), devices_found[i].hwVer, devices_found[i].tuner);
+				}
+				write_text_to_log_file(std::string(buffer));
 			}
 		}
 
@@ -509,8 +605,8 @@ namespace SDRPlayIntf
 			MessageBox(NULL, "No RSP Devices Found", "No RSP Devices", MB_OK | MB_ICONEXCLAMATION);
 		}
 
-		// 999 means not chosen last time
-		if (nLastRSPIndex == 999)
+		// If szLastRspSerial is a NULL string, it means that it was not selected last.
+		if (strnlen(szLastRspSerial, sizeof(szLastRspSerial)) == 0)
 		{
 			if (num_found == 1)
 			{
@@ -518,6 +614,10 @@ namespace SDRPlayIntf
 			}
 			else if (num_found > 1)
 			{
+				// Since MessageBox() cannot be used in the context of GetSdrInfo(), the top of the device list is automatically selected.
+				chosen_rsp_idx = 0;
+/*
+				int mb_ret;
 				i = 0;
 				while (i < num_found)
 				{
@@ -525,6 +625,10 @@ namespace SDRPlayIntf
 
 					tempstr += "Do you want to use ";
 					tempstr += tempstr2;
+					tempstr += " [" +  std::string(devices_found[i].SerNo) +"]";
+
+					write_text_to_log_file(tempstr);
+
 					mb_ret = MessageBox(NULL, tempstr.c_str(), "Multiple RSP Devices Found", MB_YESNO);
 					if (mb_ret == IDYES)
 					{
@@ -539,29 +643,54 @@ namespace SDRPlayIntf
 				{
 					MessageBox(NULL, "You Have Not Chosen a Device", "Multiple RSP Devices Found", MB_OK | MB_ICONHAND);
 				}
+*/
 			}
 		}
 		else
 		{
-			chosen_rsp_idx = nLastRSPIndex;
+			// Get the index of the serial number from the device list
+			chosen_rsp_idx = GetRspIndexBySerial(szLastRspSerial);
 		}
 
 		// select a device
 		if (chosen_rsp_idx != 255)
 		{
-			ret = sdrplay_api_SelectDevice_fn(&devices_found[chosen_rsp_idx]);
+			// Get device information for the chosen device
+			sdrplay_api_DeviceT* chosenDevice = &devices_found[chosen_rsp_idx];
+
+			if (chosenDevice->hwVer == SDRPLAY_RSPduo_ID)
+			{
+				chosenDevice->rspDuoMode = sdrplay_api_RspDuoMode_Single_Tuner;
+				chosenDevice->tuner = sdrplay_api_Tuner_A;
+				chosenDevice->rspDuoSampleFreq = 3072000.0;
+			}
+
+			ret = sdrplay_api_SelectDevice_fn(chosenDevice);
 			if (ret != sdrplay_api_Success)
 			{
 				rt_exception("sdrplay_api_SelectDevice failed = " + (std::string)sdrplay_api_GetErrorString_fn(ret));
 			}
 
-			nLastRSPIndex = chosen_rsp_idx;
+			if (debug)
+			{
+				char buf[256];
+				sprintf_s(buf, 256, "chosenDevice->rspDuoSampleFreq=%f", chosenDevice->rspDuoSampleFreq);
+				write_text_to_log_file(buf);
+			}
+
+			strcpy(szLastRspSerial, chosenDevice->SerNo);
+			strcpy(szDeviceName, GetRspName(chosenDevice->hwVer).c_str());
+		}
+		else
+		{
+			memset(szLastRspSerial, 0, sizeof(szLastRspSerial));
+			memset(szDeviceName, 0, sizeof(szDeviceName));
 		}
 
 		if (debug)
 		{
 			write_text_to_log_file("chosen_rsp_idx = " + std::to_string(chosen_rsp_idx));
-			write_text_to_log_file("nLastRSPIndex = " + std::to_string(nLastRSPIndex));
+			write_text_to_log_file("szLastRspSerial = " + std::string(szLastRspSerial));
 		}
 
 		// unlock
@@ -571,6 +700,21 @@ namespace SDRPlayIntf
 		{
 			write_text_to_log_file("end - RSP::GetDevices()");
 		}
+	}
+
+	int RSP::GetRspIndexBySerial(char *szSerial)
+	{
+		int i;
+
+		for (i = 0; i < 10; i++)
+		{
+			if (strncmp(devices_found[i].SerNo, szSerial, SDRPLAY_MAX_SER_NO_LEN) == 0)
+			{
+				return(i);
+			}
+		}
+
+		return 255;
 	}
 
 	std::string RSP::GetRspName(int hwVer)
@@ -585,11 +729,11 @@ namespace SDRPlayIntf
 		case SDRPLAY_RSP2_ID:
 			tempstr2 = "RSP2";
 			break;
-		case SDRPLAY_RSPdx_ID:
-			tempstr2 = "RSPdx";
-			break;
 		case SDRPLAY_RSPduo_ID:
 			tempstr2 = "RSPDuo";
+			break;
+		case SDRPLAY_RSPdx_ID:
+			tempstr2 = "RSPdx";
 			break;
 		case SDRPLAY_RSP1B_ID:
 			tempstr2 = "RSP1B";
