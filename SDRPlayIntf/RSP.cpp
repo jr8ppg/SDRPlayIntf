@@ -708,7 +708,7 @@ namespace SDRPlayIntf
 
 		for (i = 0; i < 10; i++)
 		{
-			if (strncmp(devices_found[i].SerNo, szSerial, SDRPLAY_MAX_SER_NO_LEN) == 0)
+			if (_strnicmp(devices_found[i].SerNo, szSerial, SDRPLAY_MAX_SER_NO_LEN) == 0)
 			{
 				return(i);
 			}
